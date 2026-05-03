@@ -172,6 +172,7 @@ module issue_read_operands
 
   logic [CVA6Cfg.NrIssuePorts-1:0][CVA6Cfg.XLEN-1:0] rs3;
   logic [CVA6Cfg.NrIssuePorts-1:0]                   rs3_fpr;
+  logic [CVA6Cfg.NrIssuePorts-1:0]                   rs3_gpr_cvxif;
 
   logic [CVA6Cfg.NrIssuePorts-1:0]                   rs1_valid;
   logic [CVA6Cfg.NrIssuePorts-1:0]                   rs2_valid;
@@ -621,16 +622,18 @@ module issue_read_operands
     ) ? 1'b1 : ((rd_clobber_gpr[issue_instr_i[i].rs2] != CSR) ||
                 (CVA6Cfg.RVS && issue_instr_i[i].op == SFENCE_VMA)));
 
-    assign rs3_has_raw[i] = ariane_pkg::is_rs3_gpr(issue_instr_i[i].op) ?
-      (rd_clobber_gpr[issue_instr_i[i].result[REG_ADDR_SIZE-1:0]] != NONE) :
-      ((CVA6Cfg.FpPresent && is_imm_fpr(
-      issue_instr_i[i].op
-    )) ? rd_clobber_fpr[issue_instr_i[i].result[REG_ADDR_SIZE-1:0]] != NONE : 1'b0);
+  assign rs3_has_raw[i] = rs3_fpr[i] ?
+    rd_clobber_fpr[issue_instr_i[i].result[REG_ADDR_SIZE-1:0]] != NONE
+    : (ariane_pkg::is_rs3_gpr(issue_instr_i[i].op) || rs3_gpr_cvxif[i]) ?
+    rd_clobber_gpr[issue_instr_i[i].result[REG_ADDR_SIZE-1:0]] != NONE
+    : 1'b0;
 
     assign rs3_valid[i] = rs3_available[i] && (ariane_pkg::is_rs3_gpr(
       issue_instr_i[i].op
     ) ? (rd_clobber_gpr[issue_instr_i[i].result[REG_ADDR_SIZE-1:0]] != CSR) : 1'b1);
     assign rs3_fpr[i] = (CVA6Cfg.FpPresent && ariane_pkg::is_imm_fpr(issue_instr_i[i].op));
+    // this will always check on any custom instruction
+    assign rs3_gpr_cvxif[i] = (CVA6Cfg.CvxifEn && OPERANDS_PER_INSTR && issue_instr_i[i].op == OFFLOAD);
 
   end
 
@@ -647,7 +650,7 @@ module issue_read_operands
     // operand forwarding signals
     forward_rs1 = '0;
     forward_rs2 = '0;
-    forward_rs3 = '0;  // FPR only
+    forward_rs3 = '0;  // FPR and CV-X-IF offload only
 
     for (int unsigned i = 0; i < CVA6Cfg.NrIssuePorts; i++) begin
       if (rs1_has_raw[i]) begin
@@ -987,7 +990,7 @@ module issue_read_operands
   logic [CVA6Cfg.NrCommitPorts-1:0][CVA6Cfg.XLEN-1:0] wdata_pack;
   logic [CVA6Cfg.NrCommitPorts-1:0]                   we_pack;
 
-  //adjust address to read from register file (when synchronous RAM is used reads take one cycle, so we advance the address)   
+  //adjust address to read from register file (when synchronous RAM is used reads take one cycle, so we advance the address)
   for (genvar i = 0; i <= CVA6Cfg.NrIssuePorts - 1; i++) begin
     assign raddr_pack[i*OPERANDS_PER_INSTR+0] = CVA6Cfg.FpgaEn && CVA6Cfg.FpgaAlteraEn ? issue_instr_i_prev[i].rs1[4:0] : issue_instr_i[i].rs1[4:0];
     assign raddr_pack[i*OPERANDS_PER_INSTR+1] = CVA6Cfg.FpgaEn && CVA6Cfg.FpgaAlteraEn ? issue_instr_i_prev[i].rs2[4:0] : issue_instr_i[i].rs2[4:0];
